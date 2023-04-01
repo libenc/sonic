@@ -2,6 +2,12 @@ on:
   push:
     tags:
       - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Addtional string to append to the tag name. e.g. -rc1"
+        required: true
+        type: string
 
 name: Build and Release
 
@@ -17,17 +23,34 @@ jobs:
         id: current_tag
         uses: WyriHaximus/github-action-get-previous-tag@v1
 
-      - name: Release package
-        run: cargo publish --no-verify --token ${CRATES_TOKEN}
-        env:
-          CRATES_TOKEN: ${{ secrets.CRATES_TOKEN }}
+      # - name: Release package
+      #   run: cargo publish --no-verify --token ${CRATES_TOKEN}
+      #   env:
+      #     CRATES_TOKEN: ${{ secrets.CRATES_TOKEN }}
+
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          components: rustfmt
+          override: true
+
+      - name: Verify versions
+        run: rustc --version && rustup --version && cargo --version
+
+      - name: Build code
+        run: cargo clean && cargo build --release --target x86_64-unknown-linux-gnu --features tokenizer-chinese
+
+      - name: Archive target
+        run: tar -czvf sonic-${{ steps.current_tag.outputs.tag }}${{ github.event.inputs.tag }}-x86_64-unknown-linux-gnu.tar.gz -C target/x86_64-unknown-linux-gnu/release/ sonic
 
       - name: Release new version
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ steps.current_tag.outputs.tag }}
-          name: Sonic ${{ steps.current_tag.outputs.tag }}
+          tag_name: ${{ steps.current_tag.outputs.tag }}${{ github.event.inputs.tag }}
+          name: Sonic ${{ steps.current_tag.outputs.tag }}${{ github.event.inputs.tag }}
           body: "⚠️ Changelog not yet provided."
+          files: sonic-${{ steps.current_tag.outputs.tag }}${{ github.event.inputs.tag }}-x86_64-unknown-linux-gnu.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -38,22 +61,52 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v2
 
-      - name: Acquire Docker image metadata
-        id: metadata
-        uses: docker/metadata-action@v4
-        with:
-          images: valeriansaliou/sonic
+      - name: Get current tag
+        id: current_tag
+        uses: WyriHaximus/github-action-get-previous-tag@v1
 
-      - name: Login to Docker Hub
+      - name: Change base image in Dockerfile
+        run: sed -i 's/FROM gcr.io\/distroless\/cc/FROM debian:bullseye-slim/g' Dockerfile
+
+      - name: Enable jieba in Dockerfile
+        run: sed -i 's/--target x86_64-unknown-linux-gnu/--target x86_64-unknown-linux-gnu --features tokenizer-chinese/g' Dockerfile
+
+      - name: Print Dockerfile
+        run: cat Dockerfile
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login to ghcr.io
         uses: docker/login-action@v2
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push Docker image
-        uses: docker/build-push-action@v3
+        uses: docker/build-push-action@v4
         with:
           context: .
-          tags: ${{ steps.metadata.outputs.tags }}
-          labels: ${{ steps.metadata.outputs.labels }}
           push: true
+          tags: ghcr.io/${{ github.repository }}:${{ steps.current_tag.outputs.tag }}${{ github.event.inputs.tag }}
+
+      # - name: Acquire Docker image metadata
+      #   id: metadata
+      #   uses: docker/metadata-action@v4
+      #   with:
+      #     images: valeriansaliou/sonic
+
+      # - name: Login to Docker Hub
+      #   uses: docker/login-action@v2
+      #   with:
+      #     username: ${{ secrets.DOCKERHUB_USERNAME }}
+      #     password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # - name: Build and push Docker image
+      #   uses: docker/build-push-action@v3
+      #   with:
+      #     context: .
+      #     tags: ${{ steps.metadata.outputs.tags }}
+      #     labels: ${{ steps.metadata.outputs.labels }}
+      #     push: true
