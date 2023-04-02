@@ -39,7 +39,7 @@ jobs:
         run: rustc --version && rustup --version && cargo --version
 
       - name: Build code
-        run: cargo clean && cargo build --release --target x86_64-unknown-linux-gnu --features tokenizer-chinese
+        run: cargo clean && cargo build --release --target x86_64-unknown-linux-gnu
 
       - name: Archive target
         run: tar -czvf sonic-${{ steps.current_tag.outputs.tag }}${{ github.event.inputs.tag }}-x86_64-unknown-linux-gnu.tar.gz -C target/x86_64-unknown-linux-gnu/release/ sonic
@@ -67,9 +67,6 @@ jobs:
 
       - name: Change base image in Dockerfile
         run: sed -i 's/FROM gcr.io\/distroless\/cc/FROM debian:bullseye-slim/g' Dockerfile
-
-      - name: Enable jieba in Dockerfile
-        run: sed -i 's/--target x86_64-unknown-linux-gnu/--target x86_64-unknown-linux-gnu --features tokenizer-chinese/g' Dockerfile
 
       - name: Print Dockerfile
         run: cat Dockerfile
